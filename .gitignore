@@ -1,0 +1,8 @@
+.env
+data/
+models/
+envs/
+third_party/
+output/
+__pycache__/
+*.pyc
