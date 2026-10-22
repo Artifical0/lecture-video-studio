@@ -12,8 +12,7 @@ import config
 
 TN_DIR = config.path('LVS_TN_DIR', config.MODELS / 'wetext-zh-tn')
 HAS_DIGIT = re.compile(r'[0-9０-９]')
-# 正则化会把中文标点换成半角；这些不算读法变化，换回原来的标点
-SAME_PUNCT = {',': '，', '.': '。', ':': '：', ';': '；', '?': '？', '!': '！', '(': '（', ')': '）'}
+CLAUSE = re.compile(r'([，。：；？！、（）“”‘’《》\s])')
 
 
 @functools.lru_cache(maxsize=1)
@@ -45,7 +44,6 @@ def changes(text, normalize=None):
         normalize = reader.normalize if reader else None
     if not normalize or not HAS_DIGIT.search(text):
         return [(text, None)] if text else []
-    spoken = normalize(text)
     out = []
 
     def keep(part):
@@ -55,23 +53,20 @@ def changes(text, normalize=None):
             else:
                 out.append((part, None))
 
-    for op, i1, i2, j1, j2 in difflib.SequenceMatcher(None, text, spoken, autojunk=False).get_opcodes():
-        before, after = text[i1:i2], spoken[j1:j2]
-        if op == 'equal':
-            keep(before)
+    # 按中文标点切成分句逐段处理：数字不会跨越这些标点；标点不送进规则，也就不会被换成半角，
+    # 否则比对时句尾的“.”可能和“12.5”里的小数点错配
+    for part in CLAUSE.split(text):
+        if not HAS_DIGIT.search(part):
+            keep(part)
             continue
-        # 改动两端被换成半角的标点不算读法变化，原样保留
-        head = tail = ''
-        while before and after and SAME_PUNCT.get(after[0]) == before[0]:
-            head, before, after = head + before[0], before[1:], after[1:]
-        while before and after and SAME_PUNCT.get(after[-1]) == before[-1]:
-            tail, before, after = before[-1] + tail, before[:-1], after[:-1]
-        keep(head)
-        if before or after:
-            if not head and out and out[-1][1] is not None:
-                # 相邻的改动合并成一段
+        spoken = normalize(part)
+        for op, i1, i2, j1, j2 in difflib.SequenceMatcher(None, part, spoken, autojunk=False).get_opcodes():
+            before, after = part[i1:i2], spoken[j1:j2]
+            if op == 'equal':
+                keep(before)
+            elif out and out[-1][1] is not None:
+                # 相邻的改动合并成一段，例如“-10℃”→“负十摄氏度”
                 out[-1] = (out[-1][0] + before, out[-1][1] + after)
             else:
                 out.append((before, after))
-        keep(tail)
     return out

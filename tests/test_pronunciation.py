@@ -135,6 +135,13 @@ class NumberReadingTests(unittest.TestCase):
         # 标点保持原样，不算读法变化
         self.assertEqual(pron.apply('在2026年，电压3.7V，误差5%。'), '在二零二六年，电压三点七V，误差百分之五。')
 
+    def test_sentence_end_period_is_not_confused_with_decimal_point(self):
+        # 真实规则把句尾“。”换成“.”；整句比对时它会和 12.5 的小数点错配
+        def tn(text):
+            return text.replace('12.5m/s', '每秒十二点五米').replace('。', '.')
+        pron = Pronunciation(numbers=True, number_reader=tn)
+        self.assertEqual(pron.apply('速度12.5m/s。'), '速度每秒十二点五米。')
+
     def test_adjacent_changes_are_one_span(self):
         segments = Pronunciation(numbers=True, number_reader=fake_tn).segments('温度-10℃。')
         self.assertEqual([s for s in segments if 'source' in s], [
