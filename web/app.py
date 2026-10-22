@@ -10,7 +10,8 @@ LVS = WEB.parent / 'lvs'
 sys.path.insert(0, str(LVS))
 import config, script as S, slides
 import number_reading
-from pronunciation import Pronunciation
+from pronunciation import MAX_RULES, Pronunciation, parse_rules
+from rulebook import RuleBook, combine
 
 JOBS = config.DATA / 'jobs'; VOICES = config.DATA / 'voices'
 for d in (JOBS, VOICES):
@@ -70,11 +71,60 @@ def read_script(raw: bytes):
     except ValueError as e:
         raise HTTPException(400, str(e))
 
-def pronunciation_settings(text, engine, tiao, numbers=''):
+RULES = RuleBook(config.DATA / 'pronunciation-rules.json')
+
+
+def pronunciation_settings(extra, engine, tiao, numbers=''):
+    """当前启用的共用规则 + 本次临时规则。返回 (读音处理, 合并后的规则文本, 临时规则的原词)。"""
     try:
-        return Pronunciation(text, engine, tiao == 'yes', numbers == 'yes')
+        temporary = parse_rules(extra)
+        text = combine(RULES.effective(engine), extra)
+        return Pronunciation(text, engine, tiao == 'yes', numbers == 'yes'), text, set(temporary)
     except ValueError as e:
         raise HTTPException(400, str(e))
+
+
+def pronunciation_preview(pron, temporary, pages, start, end):
+    """共用规则多数和这份讲稿无关，只提示没用上的临时规则；共用规则给出命中次数，列表里显示。"""
+    preview = pron.preview(pages, start, end)
+    preview['unused'] = [source for source in preview['unused'] if source in temporary]
+    return preview
+
+
+# ---------- 共用读音规则 ----------
+@app.get('/api/rules')
+def api_rules():
+    return {'rules': RULES.list(), 'max': MAX_RULES}
+
+@app.post('/api/rules')
+def api_rule_add(source: str = Form(...), target: str = Form(...), note: str = Form('')):
+    try:
+        return RULES.add(source, target, note)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+@app.patch('/api/rules/{rule_id}')
+def api_rule_edit(rule_id: str, enabled: str | None = Form(None), source: str | None = Form(None),
+                  target: str | None = Form(None)):
+    changes = {k: v for k, v in {'source': source, 'target': target}.items() if v is not None}
+    if enabled is not None:
+        if enabled not in ('yes', 'no'):
+            raise HTTPException(400, 'enabled 只能是 yes 或 no')
+        changes['enabled'] = enabled == 'yes'
+    try:
+        return RULES.update(rule_id, **changes)
+    except KeyError:
+        raise HTTPException(404, '规则不存在，可能已被别人删除')
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+@app.delete('/api/rules/{rule_id}')
+def api_rule_del(rule_id: str):
+    try:
+        RULES.delete(rule_id)
+    except KeyError:
+        raise HTTPException(404, '规则不存在，可能已被别人删除')
+    return {'ok': True}
 
 
 def check_script(pages, npdf, speed, start, end, engine='cosyvoice'):
@@ -110,7 +160,7 @@ def check_script(pages, npdf, speed, start, end, engine='cosyvoice'):
 def api_check(script: UploadFile = File(...), ppt: UploadFile | None = File(None), speed: float = Form(0.85),
               start: int = Form(0), end: int = Form(0), engine: str = Form('cosyvoice'),
               pronunciation: str = Form(''), tiao: str = Form(''), numbers: str = Form('')):
-    pron = pronunciation_settings(pronunciation, engine, tiao, numbers)
+    pron, _, temporary = pronunciation_settings(pronunciation, engine, tiao, numbers)
     title, pages = S.parse(read_script(script.file.read()))
     npdf = None
     if ppt and ppt.filename and ppt.filename.lower().endswith('.pdf'):
@@ -123,7 +173,8 @@ def api_check(script: UploadFile = File(...), ppt: UploadFile | None = File(None
             tmp.unlink(missing_ok=True)
     errs, warns, stats = check_script(pages, npdf, speed, start, end, engine)
     return {'title': title, 'pdf_pages': npdf, 'errors': errs, 'warnings': warns, 'stats': stats,
-            'pronunciation': {**pron.preview(pages, start, end), 'numbers_available': number_reading.available()},
+            'pronunciation': {**pronunciation_preview(pron, temporary, pages, start, end),
+                              'numbers_available': number_reading.available()},
             'pages': [{'no': p['no'], 'title': p['title'], 'chars': p['chars']} for p in pages]}
 
 
@@ -251,7 +302,7 @@ def api_job_add(ppt: UploadFile = File(...), script: UploadFile = File(...), tit
                 subs: str = Form('burn'), tiao: str = Form(''), engine: str = Form('cosyvoice'),
                 vox_mode: str = Form('ultimate'), style: str = Form(''), cfg: float = Form(2.0), steps: int = Form(10),
                 pronunciation: str = Form(''), numbers: str = Form('')):
-    pron = pronunciation_settings(pronunciation, engine, tiao, numbers)
+    pron, rules_text, temporary = pronunciation_settings(pronunciation, engine, tiao, numbers)
     ext = pathlib.Path(ppt.filename or '').suffix.lower()
     if ext not in ('.pdf', '.pptx', '.ppt'):
         raise HTTPException(400, '课件请上传 .pdf（推荐）或 .pptx')
@@ -289,8 +340,9 @@ def api_job_add(ppt: UploadFile = File(...), script: UploadFile = File(...), tit
            'est_minutes': stats['minutes'], 'est_gen_minutes': stats['gen_minutes'], 'voice': voice, 'voice_name': voice_name,
            'ppt_name': ppt.filename, 'script_name': script.filename, 'speed': speed, 'start': start, 'end': end,
            'subs': subs, 'tiao': tiao == 'yes', 'engine': engine, 'engine_name': ENGINES[engine]['name'],
-           'pronunciation': pronunciation, 'numbers': pron.numbers,
-           'pronunciation_preview': pron.preview(pages, start, end),
+           # 提交时的规则快照（共用规则 + 临时规则）；之后改共用规则不影响这个任务和它的重试
+           'pronunciation': rules_text, 'pronunciation_extra': pronunciation, 'numbers': pron.numbers,
+           'pronunciation_preview': pronunciation_preview(pron, temporary, pages, start, end),
            **({'vox_mode': vox_mode, 'style': style, 'cfg': cfg, 'steps': steps} if engine == 'voxcpm' else {}),
            'warnings': warns, 'outputs': {}, 'error': ''}
     with LOCK:

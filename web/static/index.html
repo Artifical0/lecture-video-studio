@@ -97,7 +97,25 @@ details.pages summary{cursor:pointer;color:var(--acc);user-select:none}
 .pron-example mark{padding:0 2px;border-radius:3px;color:inherit;background:color-mix(in srgb,var(--acc) 22%,transparent)}
 .pron-example mark.k-number{background:color-mix(in srgb,var(--ok) 22%,transparent)}
 .pron-preview .msg{margin:0 0 8px}
-.pron-rules{font-family:inherit;min-height:108px}
+.pron-rules{font-family:inherit;min-height:90px;margin-top:8px}
+.rule-list{display:grid;gap:0;margin-top:6px;border:1px solid var(--line);border-radius:var(--r-sm);max-height:340px;overflow:auto}
+.rule-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;align-items:center;gap:4px 10px;padding:7px 10px;border-top:1px solid var(--line)}
+.rule-row:first-child{border-top:0}
+.rule-row.off .rule-words{opacity:.5}
+.rule-row input[type=checkbox]{width:16px;height:16px;margin:0;accent-color:var(--acc)}
+.rule-words{min-width:0;overflow-wrap:anywhere}
+.rule-words b{font-weight:600}
+.rule-words .rule-arrow{margin:0 6px;color:var(--mut)}
+.rule-note{grid-column:2/-1;margin-top:-2px;color:var(--mut);font-size:12px}
+.rule-hit{color:var(--mut);font-size:12px;white-space:nowrap}
+.rule-hit.on{color:var(--acc)}
+.rule-acts{display:flex;gap:2px}
+.rule-acts button{border:0;background:none;color:var(--mut);font-size:12px;padding:4px 6px;border-radius:6px;cursor:pointer}
+.rule-acts button:hover{color:var(--fg);background:var(--line)}
+.rule-add{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1.4fr) auto;gap:8px;align-items:center;margin-top:8px}
+.rule-add .rule-arrow{color:var(--mut)}
+.pron-extra{margin-top:12px}
+.pron-extra summary{cursor:pointer;font-size:13px}
 
 /* 选择卡片 */
 .choices{display:grid;gap:8px}
@@ -303,14 +321,22 @@ pre.log{background:var(--surface-2);border:1px solid var(--line);border-radius:v
 
     <div class="step">
       <div class="step-h"><span class="step-n">3</span><h3>读音与口语化</h3></div>
-      <label class="f" for="pronunciation">自定义读法 <span class="hint">· 可选，每行一条</span></label>
-      <textarea class="pron-rules" name="pronunciation" id="pronunciation" maxlength="16000" spellcheck="false" placeholder="调参 => 条参&#10;我们 => 咱们&#10;2026年 => 二零二六年" aria-describedby="pronHint"></textarea>
-      <div class="hint" id="pronHint">左边写讲稿原词，右边写实际要念的文字。纠音可用同音字，口语化可改成习惯说法；字幕保留原文。两种模型都可用，不要直接填写拼音。</div>
-      <div class="hint" style="margin-top:6px">规则用于本任务所选页的所有匹配词，优先匹配长词，不连续替换。要区分语境，就填写完整词组或短句。此浏览器会记住规则。</div>
-      <label class="switch"><input type="checkbox" name="numbers" id="numbers" value="yes">
-        <div><div class="st">数字和单位按中文读</div><div class="sd" id="numbersHint">2026年 → 二零二六年，3.7V → 三点七V，5% → 百分之五，9:30 → 九点三十分。两个模型读法一致；个别型号、单位读错时用上面的规则纠正。</div></div></label>
-      <label class="switch"><input type="checkbox" name="tiao" id="tiao" value="yes">
-        <div><div class="st">“调”统一读 tiáo</div><div class="sd">调参、电调、超调…（强调、调度、对调除外）。控制、电子类课程打开。</div></div></label>
+      <div class="f">共用读音规则 <span class="hint" id="ruleCount">· 全组共用，改动对之后提交的任务生效</span></div>
+      <div id="ruleList" class="rule-list" aria-live="polite"><div class="hint">正在读取规则…</div></div>
+      <div class="rule-add">
+        <input type="text" id="ruleSource" maxlength="120" placeholder="讲稿原词，如 PX4" aria-label="原词">
+        <span class="rule-arrow" aria-hidden="true">→</span>
+        <input type="text" id="ruleTarget" maxlength="300" placeholder="实际读法，如 P叉4" aria-label="读法">
+        <button type="button" class="btn sm" id="ruleAdd">添加</button>
+      </div>
+      <div class="hint" id="pronHint">左边是讲稿原词，右边是实际要念的文字：纠音用同音字（调参 → 条参），口语化写习惯说法（我们 → 咱们），读法和原词相同表示保持原读。不要直接写拼音，模型可能当英文念。只改配音，字幕保留原文；同一位置优先匹配更长的原词，区分大小写。</div>
+      <details class="pron-extra">
+        <summary>本次临时规则 <span class="hint">· 只用于这次生成，不影响别人</span></summary>
+        <textarea class="pron-rules" name="pronunciation" id="pronunciation" maxlength="16000" spellcheck="false" placeholder="每行一条：原词 => 读法&#10;我们 => 咱们" aria-label="本次临时规则"></textarea>
+        <div class="hint">和共用规则写了同一个原词时，以这里为准。此浏览器会记住这些临时规则。</div>
+      </details>
+      <label class="switch"><input type="checkbox" name="numbers" id="numbers" value="yes" checked>
+        <div><div class="st">数字和单位按中文读</div><div class="sd" id="numbersHint">2026年 → 二零二六年，3.7V → 三点七V，5% → 百分之五，9:30 → 九点三十分。两个模型读法一致；个别型号、单位读错时用规则纠正。</div></div></label>
       <button type="button" class="btn sm" id="checkPron" style="margin-top:12px">检查读法</button>
       <div id="pronunciationPreview" class="pron-preview" aria-live="polite">上传讲稿后，可预览字幕原文和配音读法。</div>
     </div>
@@ -376,8 +402,8 @@ pre.log{background:var(--surface-2);border:1px solid var(--line);border-radius:v
 封面停留即可。
 ### 过渡
 先看一下今天的路线图。</pre>
-    <p>小技巧：句子以 。？！ 结尾，字幕也按句切分；一行一段，段间停顿稍长。某个词读错时，在“读音与口语化”里填写 <code>调参 =&gt; 条参</code>；想说得更口语化，可以填写 <code>我们 =&gt; 咱们</code>。只改配音，字幕仍取讲稿原文。</p>
-    <p>每行一条“原词 =&gt; 读法”，也支持 →，空行和 # 开头的注释会忽略，最多 100 条。规则匹配区分大小写，同位置优先匹配长词，替换后的文字不再重复替换；自定义同名词条会覆盖“调”的默认读法。规则作用于本次所选页面，填写更长的词组可限定语境。生成前点“检查读法”核对预览，再选 1～2 页试听。规则会随任务保存，失败重试沿用原设置。</p>
+    <p>小技巧：句子以 。？！ 结尾，字幕也按句切分；一行一段，段间停顿稍长。某个词读错时，在“读音与口语化”里加一条共用规则，例如 <code>调参 → 条参</code>；想说得更口语化，可以加 <code>我们 → 咱们</code>。只改配音，字幕仍取讲稿原文。</p>
+    <p>共用读音规则全组共用，每条可以单独勾选启用、修改或删除，最多 100 条；“调”读 tiáo 也是其中几条（调 → 条，强调、调度、对调保持原读），控制、电子类课程勾选即可。只想这一次用的规则写在“本次临时规则”里，每行一条“原词 =&gt; 读法”，和共用规则同一个原词时以临时规则为准。规则匹配区分大小写，同位置优先匹配长词，替换后的文字不再重复替换。生成前点“检查读法”核对预览，再选 1～2 页试听。提交时的规则随任务保存，之后改共用规则不影响已提交的任务，失败重试也沿用原来的规则。</p>
     <h3>3. 选声音和模型</h3>
     <table>
       <tr><th></th><th>CosyVoice3</th><th>VoxCPM2</th></tr>
@@ -477,7 +503,7 @@ function syncPanels() {
 const PREF_FIELDS = ['speed', 'vxSpeed', 'cfg', 'steps', 'style', 'pronunciation'];
 function savePrefs() {
   const p = {engine: engine(), vox_mode: $('input[name=vox_mode]:checked').value, subs: $('input[name=subs]:checked').value,
-             tiao: $('#tiao').checked, numbers: $('#numbers').checked, voice: $('input[name=voice]:checked')?.value};
+             numbers: $('#numbers').checked, voice: $('input[name=voice]:checked')?.value};
   PREF_FIELDS.forEach(k => p[k] = $('#' + k).value);
   store.set('prefs', p);
 }
@@ -485,7 +511,7 @@ function loadPrefs() {
   const p = store.get('prefs', {});
   for (const k of ['engine', 'vox_mode', 'subs']) { const r = p[k] && $(`input[name=${k}][value="${p[k]}"]`); if (r) r.checked = true; }
   PREF_FIELDS.forEach(k => { if (p[k] != null) $('#' + k).value = p[k]; });
-  if (p.tiao != null) $('#tiao').checked = p.tiao;
+  if (p.pronunciation?.trim()) $('.pron-extra').open = true;
   if (p.numbers != null) $('#numbers').checked = p.numbers;
   syncPanels();
 }
@@ -494,7 +520,7 @@ $$('input[name=engine], input[name=vox_mode]').forEach(r => r.addEventListener('
 ['#speed', '#vxSpeed'].forEach(s => $(s).addEventListener('input', () => { syncPanels(); savePrefs(); runCheckSoon(); }));
 $$('input[name=subs]').forEach(r => r.addEventListener('change', savePrefs));
 $('#style').addEventListener('change', savePrefs);
-['#tiao', '#numbers'].forEach(s => $(s).addEventListener('change', () => { savePrefs(); runCheck(); }));
+$('#numbers').addEventListener('change', () => { savePrefs(); runCheck(); });
 $('#pronunciation').addEventListener('input', () => {
   savePrefs(); checkOk = false; ++checkSeq;
   $('#pronunciationPreview').textContent = '读法已修改，点击“检查读法”查看效果。';
@@ -509,14 +535,14 @@ function runCheckSoon() { checkOk = false; ++checkSeq; clearTimeout(checkTimer);
 async function runCheck() {
   const seq = ++checkSeq; checkOk = false;
   const sf = $('#script').files[0], pf = $('#ppt').files[0];
-  if (!sf) { $('#checkBox').innerHTML = ''; lastCheck = null; $('#pronunciationPreview').textContent = '上传讲稿后，可预览字幕原文和配音读法。'; renderSum(); return; }
+  if (!sf) { ruleHits = {}; renderRules(); $('#checkBox').innerHTML = ''; lastCheck = null; $('#pronunciationPreview').textContent = '上传讲稿后，可预览字幕原文和配音读法。'; renderSum(); return; }
   $('#pronunciationPreview').textContent = '正在检查读法…';
   const fd = new FormData();
   fd.append('script', sf);
   if (pf && pf.name.toLowerCase().endsWith('.pdf')) fd.append('ppt', pf);
   fd.append('speed', curSpeed()); fd.append('engine', engine());
   fd.append('start', $('#start').value || 0); fd.append('end', $('#end').value || 0);
-  fd.append('pronunciation', $('#pronunciation').value); fd.append('tiao', $('#tiao').checked ? 'yes' : '');
+  fd.append('pronunciation', $('#pronunciation').value);
   fd.append('numbers', $('#numbers').checked ? 'yes' : '');
   try {
     const r = await api('/api/check', {method: 'POST', body: fd});
@@ -541,9 +567,65 @@ async function runCheck() {
   renderSum();
 }
 /* 读法预览：配音文字里被替换的片段高亮，悬停可看原词；列出在所选页没用上的规则 */
+/* ---------- 共用读音规则 ---------- */
+let rules = [], ruleHits = {};
+async function loadRules() {
+  try { rules = (await api('/api/rules')).rules; renderRules(); }
+  catch (e) { $('#ruleList').innerHTML = `<div class="msg err">${icon('alert')}<span>${esc(e.message)}</span></div>`; }
+}
+function ruleReading(r) {
+  if (r.target === r.source) return '<span class="hint">保持原读</span>';
+  return esc(r.target) + (r.cosyvoice ? ` <span class="hint">（CosyVoice 读 ${esc(r.cosyvoice.replace(/[\[\]]/g, ''))}）</span>` : '');
+}
+function renderRules() {
+  const on = rules.filter(r => r.enabled).length;
+  $('#ruleCount').textContent = `· ${on}/${rules.length} 条启用，全组共用，改动对之后提交的任务生效`;
+  $('#ruleList').innerHTML = rules.length ? rules.map(r => {
+    const hit = ruleHits[r.source];
+    return `<div class="rule-row${r.enabled ? '' : ' off'}" data-rid="${r.id}">
+      <input type="checkbox" data-ract="toggle" ${r.enabled ? 'checked' : ''} aria-label="启用 ${esc(r.source)}">
+      <div class="rule-words"><b>${esc(r.source)}</b><span class="rule-arrow">→</span>${ruleReading(r)}</div>
+      <span class="rule-hit${hit ? ' on' : ''}">${hit == null ? '' : hit ? `本讲稿 ${hit} 处` : '本讲稿没有'}</span>
+      <span class="rule-acts"><button type="button" data-ract="edit">改</button><button type="button" data-ract="del">删除</button></span>
+      ${r.note ? `<div class="rule-note">${esc(r.note)}</div>` : ''}</div>`;
+  }).join('') : '<div class="hint" style="padding:10px">还没有共用规则，在下面添加。</div>';
+}
+async function ruleRequest(path, method, data) {
+  const fd = new FormData();
+  Object.entries(data || {}).forEach(([k, v]) => fd.append(k, v));
+  await api(path, {method, body: fd});
+  await loadRules(); runCheck();
+}
+$('#ruleList').addEventListener('click', async e => {
+  const el = e.target.closest('[data-ract]'), row = e.target.closest('.rule-row');
+  if (!el || !row) return;
+  const r = rules.find(x => x.id === row.dataset.rid);
+  try {
+    if (el.dataset.ract === 'toggle') await ruleRequest(`/api/rules/${r.id}`, 'PATCH', {enabled: el.checked ? 'yes' : 'no'});
+    else if (el.dataset.ract === 'edit') {
+      const target = prompt(`“${r.source}”读作（读法和原词相同表示保持原读）：`, r.target);
+      if (target != null && target.trim() && target.trim() !== r.target) await ruleRequest(`/api/rules/${r.id}`, 'PATCH', {target});
+    } else if (el.dataset.ract === 'del' && confirm(`删除共用规则“${r.source} → ${r.target}”？所有人之后提交的任务都不再使用。`)) {
+      await ruleRequest(`/api/rules/${r.id}`, 'DELETE');
+    }
+  } catch (err) { toast(err.message, 'err'); loadRules(); }
+});
+async function addRule() {
+  const source = $('#ruleSource').value.trim(), target = $('#ruleTarget').value.trim();
+  if (!source || !target) return toast('原词和读法都要填', 'err');
+  try {
+    await ruleRequest('/api/rules', 'POST', {source, target});
+    $('#ruleSource').value = ''; $('#ruleTarget').value = ''; $('#ruleSource').focus();
+    toast('已添加到共用规则', 'ok');
+  } catch (err) { toast(err.message, 'err'); }
+}
+$('#ruleAdd').onclick = addRule;
+['#ruleSource', '#ruleTarget'].forEach(s => $(s).addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); addRule(); } }));
+
 function renderPronunciation(pr) {
+  ruleHits = pr.hits || {}; renderRules();
   const box = $('#pronunciationPreview');
-  const KIND = {rule: '自定义规则', builtin: '“调”读 tiáo', number: '数字读法'};
+  const KIND = {rule: '读音规则', builtin: '“调”读 tiáo', number: '数字读法'};
   const spoken = ex => (ex.segments || [{text: ex.spoken}]).map(seg => seg.source
     ? `<mark class="k-${seg.kind}" title="${KIND[seg.kind] || '读法'}，原文：${esc(seg.source)}">${esc(seg.display || seg.text)}</mark>` : esc(seg.text)).join('');
   $('#numbers').disabled = pr.numbers_available === false;
@@ -551,13 +633,13 @@ function renderPronunciation(pr) {
     ? '服务器缺少数字读法规则文件（models/wetext-zh-tn），这一项暂不可用。'
     : '2026年 → 二零二六年，3.7V → 三点七V，5% → 百分之五，9:30 → 九点三十分。两个模型读法一致；个别型号、单位读错时用上面的规则纠正。';
   const unused = pr.unused?.length
-    ? `<div class="msg warn">${icon('alert')}<span>${pr.unused.length} 条规则在所选页面没有用上：${pr.unused.slice(0, 8).map(w => `<b>${esc(w)}</b>`).join('、')}${pr.unused.length > 8 ? ' 等' : ''}。请核对原词（区分大小写）和页码范围。</span></div>` : '';
+    ? `<div class="msg warn">${icon('alert')}<span>${pr.unused.length} 条临时规则在所选页面没有用上：${pr.unused.slice(0, 8).map(w => `<b>${esc(w)}</b>`).join('、')}${pr.unused.length > 8 ? ' 等' : ''}。请核对原词（区分大小写）和页码范围。</span></div>` : '';
   if (!pr.changed_sentences) {
     box.innerHTML = unused || `<span class="hint">${pr.rule_count ? '' : '没有设置自定义读法，按讲稿原文朗读。'}</span>`;
     return;
   }
   const used = Object.entries(pr.hits || {}).filter(([, n]) => n).length;
-  const parts = [used && `${used} 条自定义规则生效`, pr.builtin_hits && `“调”读 tiáo ${pr.builtin_hits} 处`,
+  const parts = [used && `${used} 条规则生效`, pr.builtin_hits && `“调”读 tiáo ${pr.builtin_hits} 处`,
                  pr.number_hits && `数字读法 ${pr.number_hits} 处`].filter(Boolean).join(' · ');
   box.innerHTML = `${unused}<details open><summary>${parts} · ${pr.changed_sentences} 句读法有变化${pr.changed_sentences > pr.examples.length ? `（显示前 ${pr.examples.length} 句）` : ''}</summary>${pr.examples.map(ex =>
     `<div class="pron-example"><div class="original">P${String(ex.page).padStart(2,'0')} 字幕：${esc(ex.original)}</div><div class="spoken">配音：${spoken(ex)}</div></div>`).join('')}</details>`;
@@ -582,7 +664,6 @@ $('#jobForm').onsubmit = async e => {
   if (!$('input[name=voice]:checked')) return toast('请先选择或添加一个音色', 'err');
   const fd = new FormData(e.target);
   fd.set('speed', curSpeed()); fd.set('start', $('#start').value || 0); fd.set('end', $('#end').value || 0);
-  if (!$('#tiao').checked) fd.set('tiao', '');
   if (!$('#numbers').checked) fd.set('numbers', '');
   const btn = $('#submitBtn'), bar = $('#upbar');
   btn.disabled = true; btn.innerHTML = '<span class="spin"></span> 上传中…'; bar.hidden = false;
@@ -807,6 +888,7 @@ $('#jobs').onclick = async e => {
 };
 
 loadPrefs();
+loadRules();
 show(store.get('view', 'make') === 'help' ? 'help' : store.get('view', 'make'));
 loadVoices(); loadJobs();
 setInterval(() => { if (!document.hidden && !$('.menu-pop')) loadJobs(); }, 3000);

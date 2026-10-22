@@ -16,6 +16,7 @@ sys.path.insert(0, str(ROOT / 'lvs'))
 import config
 import script as S
 from pronunciation import MAX_RULES, MAX_TEXT, Pronunciation, parse_rules
+from rulebook import RuleBook, combine
 
 SCRIPT = '''# 测试课程
 ## P01｜第一页
@@ -161,6 +162,51 @@ class NumberReadingTests(unittest.TestCase):
         self.assertEqual(preview['examples'][-1]['spoken'], '咱们在二零二六年学习。')
 
 
+class RuleBookTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.book = RuleBook(Path(self.temp.name) / 'rules.json')
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def test_tiao_rules_start_disabled_and_use_engine_specific_reading(self):
+        self.assertEqual([r['source'] for r in self.book.list()], ['调', '强调', '调度', '对调'])
+        self.assertEqual(self.book.effective('cosyvoice'), {})
+        for rule in self.book.list():
+            self.book.update(rule['id'], enabled=True)
+        self.assertEqual(self.book.effective('cosyvoice')['调'], '[t][iáo]')
+        self.assertEqual(self.book.effective('voxcpm'), {'调': '条', '强调': '强调', '调度': '调度', '对调': '对调'})
+        text = combine(self.book.effective('voxcpm'), '')
+        self.assertEqual(Pronunciation(text).apply('强调调参，调度和对调。'), '强调条参，调度和对调。')
+
+    def test_add_edit_toggle_delete(self):
+        rule = self.book.add(' PX4 ', 'P叉4')
+        self.assertEqual((rule['source'], rule['target'], rule['enabled']), ('PX4', 'P叉4', True))
+        with self.assertRaises(ValueError):
+            self.book.add('PX4', '别的读法')
+        for bad in [('', 'x'), ('a=>b', 'c'), ('a', 'b→c'), ('a\tb', 'c')]:
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                self.book.add(*bad)
+        self.book.update(rule['id'], enabled=False)
+        self.assertNotIn('PX4', self.book.effective('voxcpm'))
+        tiao = self.book.list()[0]
+        edited = self.book.update(tiao['id'], target='掉')
+        # 改了读法后 CosyVoice 也用新读法
+        self.assertNotIn('cosyvoice', edited)
+        self.book.delete(rule['id'])
+        self.assertNotIn('PX4', [r['source'] for r in self.book.list()])
+        with self.assertRaises(KeyError):
+            self.book.delete(rule['id'])
+        # 规则保存在文件里，换个实例读出来一样
+        self.assertEqual(RuleBook(self.book.path).list(), self.book.list())
+
+    def test_temporary_rules_override_shared_ones(self):
+        self.book.add('PX4', 'P叉4')
+        text = combine(self.book.effective('voxcpm'), 'PX4 => 皮埃克斯四\n我们 => 咱们')
+        self.assertEqual(parse_rules(text), {'PX4': '皮埃克斯四', '我们': '咱们'})
+
+
 class ApiTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -250,6 +296,37 @@ class ApiTests(unittest.TestCase):
         self.assertIn('--numbers', popen.call_args.args[0])
         with patch('number_reading.available', return_value=False):
             self.assertFalse(self.add('', numbers='yes').json()['numbers'])
+
+    def test_shared_rules_api_and_job_snapshot(self):
+        rules = self.client.get('/api/rules').json()['rules']
+        for rule in rules:
+            self.client.patch(f"/api/rules/{rule['id']}", data={'enabled': 'yes'})
+        added = self.client.post('/api/rules', data={'source': '继续', 'target': '接着'})
+        self.assertEqual(added.status_code, 200, added.text)
+        self.assertEqual(self.client.post('/api/rules', data={'source': '继续', 'target': 'x'}).status_code, 400)
+        try:
+            check = self.check(pronunciation='我们 => 咱们\n不存在 => 没有', engine='voxcpm').json()['pronunciation']
+            # 共用规则只报命中次数，没用上的只提示临时规则
+            self.assertEqual(check['unused'], ['不存在'])
+            self.assertEqual(check['hits']['继续'], 1)
+            self.assertEqual(check['hits']['调'], 1)
+            job = self.add('我们 => 咱们', engine='voxcpm', speed=0.9).json()
+            self.assertIn('继续 => 接着', job['pronunciation'])
+            self.assertIn('调 => 条', job['pronunciation'])
+            self.assertEqual(job['pronunciation_extra'], '我们 => 咱们')
+            # 之后删掉共用规则，已提交任务的重试仍用提交时的规则
+            self.client.delete(f"/api/rules/{added.json()['id']}")
+            self.mod.update(job['id'], status='failed')
+            with patch.object(self.mod, 'voice_files'):
+                retry = self.client.post(f'/api/jobs/{job["id"]}/retry').json()
+            self.assertIn('继续 => 接着', retry['pronunciation'])
+            self.assertEqual(self.client.patch('/api/rules/nope', data={'enabled': 'yes'}).status_code, 404)
+        finally:
+            for rule in self.client.get('/api/rules').json()['rules']:
+                if rule['source'] == '继续':
+                    self.client.delete(f"/api/rules/{rule['id']}")
+                else:
+                    self.client.patch(f"/api/rules/{rule['id']}", data={'enabled': 'no'})
 
     def test_worker_writes_snapshot_and_forwards_cli_argument(self):
         for legacy in (False, True):
