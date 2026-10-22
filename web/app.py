@@ -9,6 +9,7 @@ WEB = pathlib.Path(__file__).resolve().parent
 LVS = WEB.parent / 'lvs'
 sys.path.insert(0, str(LVS))
 import config, script as S, slides
+from pronunciation import Pronunciation
 
 JOBS = config.DATA / 'jobs'; VOICES = config.DATA / 'voices'
 for d in (JOBS, VOICES):
@@ -68,6 +69,13 @@ def read_script(raw: bytes):
     except ValueError as e:
         raise HTTPException(400, str(e))
 
+def pronunciation_settings(text, engine, tiao):
+    try:
+        return Pronunciation(text, engine, tiao == 'yes')
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
 def check_script(pages, npdf, speed, start, end, engine='cosyvoice'):
     """返回 (错误, 警告, 统计)。"""
     errs, warns = [], []
@@ -99,7 +107,9 @@ def check_script(pages, npdf, speed, start, end, engine='cosyvoice'):
 
 @app.post('/api/check')
 def api_check(script: UploadFile = File(...), ppt: UploadFile | None = File(None), speed: float = Form(0.85),
-              start: int = Form(0), end: int = Form(0), engine: str = Form('cosyvoice')):
+              start: int = Form(0), end: int = Form(0), engine: str = Form('cosyvoice'),
+              pronunciation: str = Form(''), tiao: str = Form('')):
+    pron = pronunciation_settings(pronunciation, engine, tiao)
     title, pages = S.parse(read_script(script.file.read()))
     npdf = None
     if ppt and ppt.filename and ppt.filename.lower().endswith('.pdf'):
@@ -112,6 +122,7 @@ def api_check(script: UploadFile = File(...), ppt: UploadFile | None = File(None
             tmp.unlink(missing_ok=True)
     errs, warns, stats = check_script(pages, npdf, speed, start, end, engine)
     return {'title': title, 'pdf_pages': npdf, 'errors': errs, 'warnings': warns, 'stats': stats,
+            'pronunciation': pron.preview(pages, start, end),
             'pages': [{'no': p['no'], 'title': p['title'], 'chars': p['chars']} for p in pages]}
 
 
@@ -237,7 +248,9 @@ def safe_name(s):
 def api_job_add(ppt: UploadFile = File(...), script: UploadFile = File(...), title: str = Form(''),
                 voice: str = Form(''), speed: float = Form(0.85), start: int = Form(0), end: int = Form(0),
                 subs: str = Form('burn'), tiao: str = Form(''), engine: str = Form('cosyvoice'),
-                vox_mode: str = Form('ultimate'), style: str = Form(''), cfg: float = Form(2.0), steps: int = Form(10)):
+                vox_mode: str = Form('ultimate'), style: str = Form(''), cfg: float = Form(2.0), steps: int = Form(10),
+                pronunciation: str = Form('')):
+    pron = pronunciation_settings(pronunciation, engine, tiao)
     ext = pathlib.Path(ppt.filename or '').suffix.lower()
     if ext not in ('.pdf', '.pptx', '.ppt'):
         raise HTTPException(400, '课件请上传 .pdf（推荐）或 .pptx')
@@ -275,6 +288,7 @@ def api_job_add(ppt: UploadFile = File(...), script: UploadFile = File(...), tit
            'est_minutes': stats['minutes'], 'est_gen_minutes': stats['gen_minutes'], 'voice': voice, 'voice_name': voice_name,
            'ppt_name': ppt.filename, 'script_name': script.filename, 'speed': speed, 'start': start, 'end': end,
            'subs': subs, 'tiao': tiao == 'yes', 'engine': engine, 'engine_name': ENGINES[engine]['name'],
+           'pronunciation': pronunciation, 'pronunciation_preview': pron.preview(pages, start, end),
            **({'vox_mode': vox_mode, 'style': style, 'cfg': cfg, 'steps': steps} if engine == 'voxcpm' else {}),
            'warnings': warns, 'outputs': {}, 'error': ''}
     with LOCK:
@@ -402,6 +416,10 @@ def run_job(job):
                    '--voice-wav', str(wav), '--voice-text', str(txt), '--speed', str(job['speed']), '--subs', job['subs']]
             if job['tiao']:
                 cmd.append('--tiao')
+            if job.get('pronunciation'):
+                rules_file = d / 'pronunciation.txt'
+                rules_file.write_text(job['pronunciation'], encoding='utf-8')
+                cmd += ['--pronunciation', str(rules_file)]
             if job.get('engine') == 'voxcpm':
                 cmd += ['--engine', 'voxcpm', '--vox-mode', job['vox_mode'], '--cfg', str(job['cfg']), '--steps', str(job['steps'])]
                 if job.get('style'):

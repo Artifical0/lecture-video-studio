@@ -89,6 +89,12 @@ details.pages summary{cursor:pointer;color:var(--acc);user-select:none}
 .pagelist{max-height:220px;overflow:auto;margin-top:6px;border:1px solid var(--line);border-radius:var(--r-sm)}
 .pagelist div{display:flex;gap:10px;padding:4px 10px;border-top:1px solid var(--line)}.pagelist div:first-child{border-top:0}
 .pagelist .no{color:var(--mut);width:34px;font-variant-numeric:tabular-nums}.pagelist .tt{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.pagelist .c{color:var(--mut)}
+.pron-preview{margin-top:10px;font-size:12px;overflow-wrap:anywhere}
+.pron-preview summary{cursor:pointer;color:var(--acc)}
+.pron-example{padding:8px 0;border-bottom:1px solid var(--line)}
+.pron-example .original{color:var(--mut)}
+.pron-example .spoken{color:var(--fg);margin-top:3px}
+.pron-rules{font-family:inherit;min-height:108px}
 
 /* 选择卡片 */
 .choices{display:grid;gap:8px}
@@ -293,7 +299,19 @@ pre.log{background:var(--surface-2);border:1px solid var(--line);border-radius:v
     </div>
 
     <div class="step">
-      <div class="step-h"><span class="step-n">3</span><h3>输出</h3></div>
+      <div class="step-h"><span class="step-n">3</span><h3>读音与口语化</h3></div>
+      <label class="f" for="pronunciation">自定义读法 <span class="hint">· 可选，每行一条</span></label>
+      <textarea class="pron-rules" name="pronunciation" id="pronunciation" maxlength="16000" spellcheck="false" placeholder="调参 => 条参&#10;我们 => 咱们&#10;2026年 => 二零二六年" aria-describedby="pronHint"></textarea>
+      <div class="hint" id="pronHint">左边写讲稿原词，右边写实际要念的文字。纠音可用同音字，口语化可改成习惯说法；字幕保留原文。两种模型都可用，不要直接填写拼音。</div>
+      <div class="hint" style="margin-top:6px">规则用于本任务所选页的所有匹配词，优先匹配长词，不连续替换。要区分语境，就填写完整词组或短句。此浏览器会记住规则。</div>
+      <label class="switch"><input type="checkbox" name="tiao" id="tiao" value="yes">
+        <div><div class="st">“调”统一读 tiáo</div><div class="sd">调参、电调、超调…（强调、调度、对调除外）。控制、电子类课程打开。</div></div></label>
+      <button type="button" class="btn sm" id="checkPron" style="margin-top:12px">检查读法</button>
+      <div id="pronunciationPreview" class="pron-preview" aria-live="polite">上传讲稿后，可预览字幕原文和配音读法。</div>
+    </div>
+
+    <div class="step">
+      <div class="step-h"><span class="step-n">4</span><h3>输出</h3></div>
       <label class="f">视频标题 <span class="hint">· 可选，默认取讲稿第一行标题</span></label>
       <input type="text" name="title" id="title" maxlength="80">
       <label class="f">页码范围 <span class="hint">· 可选，先做几页试听很有用</span></label>
@@ -304,8 +322,6 @@ pre.log{background:var(--surface-2);border:1px solid var(--line);border-radius:v
         <label><input type="radio" name="subs" value="soft">软字幕（可开关）</label>
         <label><input type="radio" name="subs" value="none">只要 .srt</label>
       </div>
-      <label class="switch"><input type="checkbox" name="tiao" id="tiao" value="yes">
-        <div><div class="st">“调”统一读 tiáo</div><div class="sd">调参、电调、超调…（强调、调度除外）。控制、电子类课程打开；其他课程关闭。</div></div></label>
     </div>
 
     <div class="submit">
@@ -355,7 +371,8 @@ pre.log{background:var(--surface-2);border:1px solid var(--line);border-radius:v
 封面停留即可。
 ### 过渡
 先看一下今天的路线图。</pre>
-    <p>小技巧：句子以 。？！ 结尾，字幕也按句切分；一行一段，段间停顿稍长；某个词读音不对，就在讲稿里改写成想要的读法。</p>
+    <p>小技巧：句子以 。？！ 结尾，字幕也按句切分；一行一段，段间停顿稍长。某个词读错时，在“读音与口语化”里填写 <code>调参 =&gt; 条参</code>；想说得更口语化，可以填写 <code>我们 =&gt; 咱们</code>。只改配音，字幕仍取讲稿原文。</p>
+    <p>每行一条“原词 =&gt; 读法”，也支持 →，空行和 # 开头的注释会忽略，最多 100 条。规则匹配区分大小写，同位置优先匹配长词，替换后的文字不再重复替换；自定义同名词条会覆盖“调”的默认读法。规则作用于本次所选页面，填写更长的词组可限定语境。生成前点“检查读法”核对预览，再选 1～2 页试听。规则会随任务保存，失败重试沿用原设置。</p>
     <h3>3. 选声音和模型</h3>
     <table>
       <tr><th></th><th>CosyVoice3</th><th>VoxCPM2</th></tr>
@@ -452,7 +469,7 @@ function syncPanels() {
   $('#speedV').value = (+$('#speed').value).toFixed(2); $('#vxSpeedV').value = (+$('#vxSpeed').value).toFixed(2);
   $('#cfgV').value = (+$('#cfg').value).toFixed(1); $('#stepsV').value = $('#steps').value;
 }
-const PREF_FIELDS = ['speed', 'vxSpeed', 'cfg', 'steps', 'style'];
+const PREF_FIELDS = ['speed', 'vxSpeed', 'cfg', 'steps', 'style', 'pronunciation'];
 function savePrefs() {
   const p = {engine: engine(), vox_mode: $('input[name=vox_mode]:checked').value, subs: $('input[name=subs]:checked').value,
              tiao: $('#tiao').checked, voice: $('input[name=voice]:checked')?.value};
@@ -470,25 +487,39 @@ $$('input[name=engine], input[name=vox_mode]').forEach(r => r.addEventListener('
 ['#cfg', '#steps'].forEach(s => $(s).addEventListener('input', () => { syncPanels(); savePrefs(); }));
 ['#speed', '#vxSpeed'].forEach(s => $(s).addEventListener('input', () => { syncPanels(); savePrefs(); runCheckSoon(); }));
 $$('input[name=subs]').forEach(r => r.addEventListener('change', savePrefs));
-['#tiao', '#style'].forEach(s => $(s).addEventListener('change', savePrefs));
+$('#style').addEventListener('change', savePrefs);
+$('#tiao').addEventListener('change', () => { savePrefs(); runCheck(); });
+$('#pronunciation').addEventListener('input', () => {
+  savePrefs(); checkOk = false; ++checkSeq;
+  $('#pronunciationPreview').textContent = '读法已修改，点击“检查读法”查看效果。';
+});
+$('#pronunciation').addEventListener('change', runCheck);
+$('#checkPron').onclick = runCheck;
 ['#start', '#end'].forEach(s => $(s).addEventListener('change', runCheck));
 
 /* ---------- 讲稿检查 ---------- */
 let checkSeq = 0, checkOk = false, lastCheck = null, checkTimer;
-function runCheckSoon() { clearTimeout(checkTimer); checkTimer = setTimeout(runCheck, 300); }
+function runCheckSoon() { checkOk = false; ++checkSeq; clearTimeout(checkTimer); checkTimer = setTimeout(runCheck, 300); }
 async function runCheck() {
+  const seq = ++checkSeq; checkOk = false;
   const sf = $('#script').files[0], pf = $('#ppt').files[0];
-  if (!sf) { $('#checkBox').innerHTML = ''; checkOk = false; lastCheck = null; renderSum(); return; }
+  if (!sf) { $('#checkBox').innerHTML = ''; lastCheck = null; $('#pronunciationPreview').textContent = '上传讲稿后，可预览字幕原文和配音读法。'; renderSum(); return; }
+  $('#pronunciationPreview').textContent = '正在检查读法…';
   const fd = new FormData();
   fd.append('script', sf);
   if (pf && pf.name.toLowerCase().endsWith('.pdf')) fd.append('ppt', pf);
   fd.append('speed', curSpeed()); fd.append('engine', engine());
   fd.append('start', $('#start').value || 0); fd.append('end', $('#end').value || 0);
-  const seq = ++checkSeq;
+  fd.append('pronunciation', $('#pronunciation').value); fd.append('tiao', $('#tiao').checked ? 'yes' : '');
   try {
     const r = await api('/api/check', {method: 'POST', body: fd});
     if (seq !== checkSeq) return;
     lastCheck = r; checkOk = !r.errors.length;
+    const pr = r.pronunciation;
+    $('#pronunciationPreview').innerHTML = pr.changed_sentences
+      ? `<details open><summary>${pr.rule_count} 条自定义规则 · ${pr.changed_sentences} 句读法有变化${pr.changed_sentences > pr.examples.length ? `（显示前 ${pr.examples.length} 句）` : ''}</summary>${pr.examples.map(p =>
+          `<div class="pron-example"><div class="original">P${String(p.page).padStart(2,'0')} 字幕：${esc(p.original)}</div><div class="spoken">配音：${esc(p.spoken)}</div></div>`).join('')}</details>`
+      : `<span class="hint">${pr.rule_count ? `${pr.rule_count} 条规则未改变所选页的读法，请核对原词和页码。` : '未设置自定义读法，按讲稿原文朗读。'}</span>`;
     $('#title').placeholder = r.title || '';
     let h = '';
     if (r.stats.pages) h += `<div class="stats">
@@ -503,7 +534,7 @@ async function runCheck() {
     if (r.pages.length) h += `<details class="pages"><summary>查看讲稿页面（${r.pages.length} 页）</summary><div class="pagelist">${
       r.pages.map(p => `<div><span class="no">P${String(p.no).padStart(2,'0')}</span><span class="tt">${esc(p.title)}</span><span class="c">${p.chars} 字</span></div>`).join('')}</div></details>`;
     $('#checkBox').innerHTML = h;
-  } catch (e) { if (seq === checkSeq) { checkOk = false; $('#checkBox').innerHTML = `<div class="msg err">${icon('alert')}<span>${esc(e.message)}</span></div>`; } }
+  } catch (e) { if (seq === checkSeq) { checkOk = false; lastCheck = null; $('#pronunciationPreview').textContent = '检查未通过，请按红色提示修改。'; $('#checkBox').innerHTML = `<div class="msg err">${icon('alert')}<span>${esc(e.message)}</span></div>`; } }
   renderSum();
 }
 function renderSum() {
@@ -679,6 +710,7 @@ function renderJob(j) {
     <div>
       <div class="t-top"><div class="t-title">${esc(j.title)}</div><span class="pill p-${j.status}">${STATUS[j.status]}${j.status === 'queued' && j.queue_pos ? ` · 第 ${j.queue_pos} 位` : ''}</span></div>
       <div class="t-meta"><span>${fmtTime(j.created)}</span><span>${esc(j.voice_name)}</span><span>${model}</span><span>语速 ${j.speed}</span><span>${pages}</span>
+        ${j.pronunciation_preview?.rule_count ? `<span>自定义读法 ${j.pronunciation_preview.rule_count} 条</span>` : ''}
         ${done && j.started && j.finished ? `<span>用时 ${fmtDur(j.finished - j.started)}</span>` : ''}</div>`;
   if (j.status === 'running') {
     const p = jobProgress(j);

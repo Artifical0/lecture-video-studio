@@ -6,3 +6,5 @@ third_party/
 output/
 __pycache__/
 *.pyc
+.venv/
+docs/deployment-*.md
