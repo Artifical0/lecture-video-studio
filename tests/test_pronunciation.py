@@ -72,8 +72,35 @@ class PronunciationTests(unittest.TestCase):
         before = copy.deepcopy(pages)
         preview = Pronunciation(RULES).preview(pages, start=2, end=2)
         self.assertEqual(preview['changed_sentences'], 1)
-        self.assertEqual(preview['examples'], [{'page': 2, 'original': '我们在2026年学习。', 'spoken': '咱们在二零二六年学习。'}])
+        self.assertEqual(preview['examples'], [{
+            'page': 2, 'original': '我们在2026年学习。', 'spoken': '咱们在二零二六年学习。',
+            'segments': [{'text': '咱们', 'source': '我们', 'kind': 'rule'}, {'text': '在'},
+                         {'text': '二零二六年', 'source': '2026年', 'kind': 'rule'}, {'text': '学习。'}],
+        }])
+        # 第 2 页没有“调参”：这条规则在所选页面没用上
+        self.assertEqual(preview['hits'], {'调参': 0, '我们': 1, '2026年': 1})
+        self.assertEqual(preview['unused'], ['调参'])
         self.assertEqual(pages, before)
+
+    def test_segments_mark_only_real_changes(self):
+        pron = Pronunciation('调参 => 条参', tiao=True, engine='voxcpm')
+        segments = pron.segments('强调调参和电调。')
+        self.assertEqual(segments, [{'text': '强调'}, {'text': '条参', 'source': '调参', 'kind': 'rule'},
+                                    {'text': '和电'}, {'text': '条', 'source': '调', 'kind': 'builtin'},
+                                    {'text': '。'}])
+        self.assertEqual(''.join(seg['text'] for seg in segments), pron.apply('强调调参和电调。'))
+
+    def test_cosyvoice_markup_is_shown_readably(self):
+        [seg] = [s for s in Pronunciation(tiao=True).segments('电调。') if 'source' in s]
+        self.assertEqual(seg, {'text': '[t][iáo]', 'source': '调', 'kind': 'builtin', 'display': '调(tiáo)'})
+
+    def test_preview_counts_builtin_and_custom_hits_separately(self):
+        _, pages = S.parse(SCRIPT)
+        preview = Pronunciation('我们 => 咱们', engine='voxcpm', tiao=True).preview(pages)
+        # 只有 P01 的“调参”换成“条”；强调、调度、对调受保护
+        self.assertEqual(preview['builtin_hits'], 1)
+        self.assertEqual(preview['hits'], {'我们': 3})
+        self.assertEqual(preview['unused'], [])
 
     def test_preview_cap_counts_all_changes(self):
         pages = [{'no': 1, 'paras': ['我们继续。' * 20]}]
@@ -85,6 +112,53 @@ class PronunciationTests(unittest.TestCase):
         _, pages = S.parse(SCRIPT)
         pr = Pronunciation('调参。强调 => 不会跨句匹配').preview(pages)
         self.assertEqual(pr['changed_sentences'], 0)
+
+
+def fake_tn(text):
+    """模拟 wetext：数字改成汉字读法，同时把中文标点换成半角（真实规则也会这样）。"""
+    for before, after in [('2026年', '二零二六年'), ('3.7V', '三点七V'), ('5%', '百分之五'), ('-10℃', '负十摄氏度'), ('4', '四')]:
+        text = text.replace(before, after)
+    return text.replace('，', ',').replace('。', '.')
+
+
+class NumberReadingTests(unittest.TestCase):
+    def test_only_number_spans_are_marked(self):
+        pron = Pronunciation(numbers=True, number_reader=fake_tn)
+        segments = pron.segments('在2026年，电压3.7V，误差5%。')
+        self.assertEqual([s for s in segments if 'source' in s], [
+            # 只标出真正变化的字：“年”“V”原样保留
+            {'text': '二零二六', 'source': '2026', 'kind': 'number'},
+            {'text': '三点七', 'source': '3.7', 'kind': 'number'},
+            {'text': '百分之五', 'source': '5%', 'kind': 'number'},
+        ])
+        # 标点保持原样，不算读法变化
+        self.assertEqual(pron.apply('在2026年，电压3.7V，误差5%。'), '在二零二六年，电压三点七V，误差百分之五。')
+
+    def test_adjacent_changes_are_one_span(self):
+        segments = Pronunciation(numbers=True, number_reader=fake_tn).segments('温度-10℃。')
+        self.assertEqual([s for s in segments if 'source' in s], [
+            {'text': '负十摄氏度', 'source': '-10℃', 'kind': 'number'}])
+
+    def test_rules_win_and_their_output_is_not_normalized(self):
+        pron = Pronunciation('PX4 => P叉4\n5000mAh => 五千毫安时', numbers=True, number_reader=fake_tn)
+        self.assertEqual(pron.apply('PX4飞控用4块5000mAh电池。'), 'P叉4飞控用四块五千毫安时电池。')
+
+    def test_text_without_digits_skips_the_normalizer(self):
+        calls = []
+        pron = Pronunciation(numbers=True, number_reader=lambda text: calls.append(text) or text)
+        self.assertEqual(pron.apply('没有数字。'), '没有数字。')
+        self.assertEqual(calls, [])
+
+    def test_switched_off_or_unavailable(self):
+        self.assertEqual(Pronunciation(number_reader=fake_tn).apply('2026年。'), '2026年。')
+        with patch('number_reading.available', return_value=False):
+            self.assertFalse(Pronunciation(numbers=True).numbers)
+
+    def test_preview_counts_number_spans(self):
+        _, pages = S.parse(SCRIPT)
+        preview = Pronunciation('我们 => 咱们', numbers=True, number_reader=fake_tn).preview(pages)
+        self.assertEqual(preview['number_hits'], 1)
+        self.assertEqual(preview['examples'][-1]['spoken'], '咱们在二零二六年学习。')
 
 
 class ApiTests(unittest.TestCase):
@@ -165,6 +239,17 @@ class ApiTests(unittest.TestCase):
             r = self.client.post(f'/api/jobs/{job["id"]}/retry')
         self.assertEqual(r.status_code, 200)
         self.assertNotIn('pronunciation', r.json())
+
+    def test_number_reading_is_saved_with_the_job_and_forwarded(self):
+        with patch('number_reading.available', return_value=True):
+            job = self.add('', numbers='yes').json()
+        self.assertTrue(job['numbers'])
+        process = types.SimpleNamespace(stdout=iter([]), wait=lambda: 1)
+        with patch.object(self.mod, 'prepare_images'), patch.object(self.mod, 'voice_files', return_value=('ref.wav', 'ref.txt')), patch.object(self.mod.subprocess, 'Popen', return_value=process) as popen:
+            self.mod.run_job(job)
+        self.assertIn('--numbers', popen.call_args.args[0])
+        with patch('number_reading.available', return_value=False):
+            self.assertFalse(self.add('', numbers='yes').json()['numbers'])
 
     def test_worker_writes_snapshot_and_forwards_cli_argument(self):
         for legacy in (False, True):

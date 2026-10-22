@@ -1,6 +1,11 @@
-"""逐词修改送给 TTS 的文字；讲稿和字幕始终保留原文。只用标准库。"""
+"""逐词修改送给 TTS 的文字；讲稿和字幕始终保留原文。
+
+处理顺序：自定义规则 → “调”读 tiáo（可选）→ 数字和单位按中文读（可选）。
+前两步按原词替换，替换结果不再被后面的步骤修改；数字读法只处理没被规则替换的部分。
+"""
 import re
 
+import number_reading as N
 import script as S
 
 MAX_RULES = 100
@@ -34,8 +39,12 @@ def parse_rules(text):
 
 
 class Pronunciation:
-    def __init__(self, text='', engine='cosyvoice', tiao=False):
+    def __init__(self, text='', engine='cosyvoice', tiao=False, numbers=False, number_reader=None):
         self.rules = parse_rules(text)
+        self.tiao = tiao
+        # number_reader: 文字 → 读法，测试时可替换；默认用 wetext 规则，缺少规则文件时跳过
+        self.numbers = numbers and (number_reader is not None or N.available())
+        self._number_reader = number_reader
         replacements = dict(self.rules)
         if tiao:
             for word in DIAO_WORDS:
@@ -46,20 +55,63 @@ class Pronunciation:
         self.pattern = re.compile('|'.join(re.escape(w) for w in sorted(replacements, key=len, reverse=True))) if replacements else None
 
     def apply(self, text):
-        if not self.pattern:
-            return text
-        return self.pattern.sub(lambda m: self.replacements[m.group()], text)
+        return ''.join(seg['text'] for seg in self.segments(text))
+
+    def segments(self, text):
+        """把配音文字切成片段，拼起来就是 apply 的结果。改动过的片段带 source（原文）和 kind：
+        rule 自定义规则、builtin “调”读 tiáo、number 数字和单位读法。"""
+        out = []
+        def plain(part):
+            if not part:
+                return
+            pieces = N.changes(part, self._number_reader) if self.numbers else [(part, None)]
+            for before, after in pieces:
+                out.append({'text': before} if after is None else {'text': after, 'source': before, 'kind': 'number'})
+        pos = 0
+        for m in (self.pattern.finditer(text) if self.pattern else ()):
+            plain(text[pos:m.start()])
+            spoken = self.replacements[m.group()]
+            if spoken == m.group():
+                # 强调、调度等受保护的词原样保留，不算改动
+                out.append({'text': spoken})
+            else:
+                kind = 'rule' if m.group() in self.rules else 'builtin'
+                seg = {'text': spoken, 'source': m.group(), 'kind': kind}
+                if spoken.startswith('['):
+                    # CosyVoice 的拼音标注 [t][iáo] 不好读，预览里显示成 调(tiáo)
+                    reading = ''.join(re.findall(r'\[([^\]]+)\]', spoken))
+                    seg['display'] = f'{m.group()}({reading})'
+                out.append(seg)
+            pos = m.end()
+        plain(text[pos:])
+        return out
 
     def preview(self, pages, start=0, end=0, limit=12):
-        examples, changed = [], 0
+        """所选页里读法有变化的句子（最多 limit 条示例），以及每条自定义规则用上了几次。"""
+        examples, changed, builtin, number = [], 0, 0, 0
+        hits = dict.fromkeys(self.rules, 0)
         for page in pages:
             if (start and page['no'] < start) or (end and page['no'] > end):
                 continue
             for para in page['paras']:
                 for original in S.sentences(para):
-                    spoken = self.apply(original)
-                    if spoken != original:
-                        changed += 1
-                        if len(examples) < limit:
-                            examples.append({'page': page['no'], 'original': original.strip(), 'spoken': spoken.strip()})
-        return {'rule_count': len(self.rules), 'changed_sentences': changed, 'examples': examples}
+                    original = original.strip()
+                    segments = self.segments(original)
+                    edits = [seg for seg in segments if 'source' in seg]
+                    if not edits:
+                        continue
+                    changed += 1
+                    for seg in edits:
+                        if seg['kind'] == 'rule':
+                            hits[seg['source']] += 1
+                        elif seg['kind'] == 'builtin':
+                            builtin += 1
+                        else:
+                            number += 1
+                    if len(examples) < limit:
+                        examples.append({'page': page['no'], 'original': original,
+                                         'spoken': ''.join(seg['text'] for seg in segments),
+                                         'segments': segments})
+        return {'rule_count': len(self.rules), 'changed_sentences': changed, 'examples': examples,
+                'hits': hits, 'unused': [source for source, n in hits.items() if not n],
+                'builtin_hits': builtin, 'number_hits': number}

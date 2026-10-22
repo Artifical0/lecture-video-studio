@@ -94,6 +94,9 @@ details.pages summary{cursor:pointer;color:var(--acc);user-select:none}
 .pron-example{padding:8px 0;border-bottom:1px solid var(--line)}
 .pron-example .original{color:var(--mut)}
 .pron-example .spoken{color:var(--fg);margin-top:3px}
+.pron-example mark{padding:0 2px;border-radius:3px;color:inherit;background:color-mix(in srgb,var(--acc) 22%,transparent)}
+.pron-example mark.k-number{background:color-mix(in srgb,var(--ok) 22%,transparent)}
+.pron-preview .msg{margin:0 0 8px}
 .pron-rules{font-family:inherit;min-height:108px}
 
 /* 选择卡片 */
@@ -304,6 +307,8 @@ pre.log{background:var(--surface-2);border:1px solid var(--line);border-radius:v
       <textarea class="pron-rules" name="pronunciation" id="pronunciation" maxlength="16000" spellcheck="false" placeholder="调参 => 条参&#10;我们 => 咱们&#10;2026年 => 二零二六年" aria-describedby="pronHint"></textarea>
       <div class="hint" id="pronHint">左边写讲稿原词，右边写实际要念的文字。纠音可用同音字，口语化可改成习惯说法；字幕保留原文。两种模型都可用，不要直接填写拼音。</div>
       <div class="hint" style="margin-top:6px">规则用于本任务所选页的所有匹配词，优先匹配长词，不连续替换。要区分语境，就填写完整词组或短句。此浏览器会记住规则。</div>
+      <label class="switch"><input type="checkbox" name="numbers" id="numbers" value="yes">
+        <div><div class="st">数字和单位按中文读</div><div class="sd" id="numbersHint">2026年 → 二零二六年，3.7V → 三点七V，5% → 百分之五，9:30 → 九点三十分。两个模型读法一致；个别型号、单位读错时用上面的规则纠正。</div></div></label>
       <label class="switch"><input type="checkbox" name="tiao" id="tiao" value="yes">
         <div><div class="st">“调”统一读 tiáo</div><div class="sd">调参、电调、超调…（强调、调度、对调除外）。控制、电子类课程打开。</div></div></label>
       <button type="button" class="btn sm" id="checkPron" style="margin-top:12px">检查读法</button>
@@ -472,7 +477,7 @@ function syncPanels() {
 const PREF_FIELDS = ['speed', 'vxSpeed', 'cfg', 'steps', 'style', 'pronunciation'];
 function savePrefs() {
   const p = {engine: engine(), vox_mode: $('input[name=vox_mode]:checked').value, subs: $('input[name=subs]:checked').value,
-             tiao: $('#tiao').checked, voice: $('input[name=voice]:checked')?.value};
+             tiao: $('#tiao').checked, numbers: $('#numbers').checked, voice: $('input[name=voice]:checked')?.value};
   PREF_FIELDS.forEach(k => p[k] = $('#' + k).value);
   store.set('prefs', p);
 }
@@ -481,6 +486,7 @@ function loadPrefs() {
   for (const k of ['engine', 'vox_mode', 'subs']) { const r = p[k] && $(`input[name=${k}][value="${p[k]}"]`); if (r) r.checked = true; }
   PREF_FIELDS.forEach(k => { if (p[k] != null) $('#' + k).value = p[k]; });
   if (p.tiao != null) $('#tiao').checked = p.tiao;
+  if (p.numbers != null) $('#numbers').checked = p.numbers;
   syncPanels();
 }
 $$('input[name=engine], input[name=vox_mode]').forEach(r => r.addEventListener('change', () => { syncPanels(); savePrefs(); runCheck(); }));
@@ -488,7 +494,7 @@ $$('input[name=engine], input[name=vox_mode]').forEach(r => r.addEventListener('
 ['#speed', '#vxSpeed'].forEach(s => $(s).addEventListener('input', () => { syncPanels(); savePrefs(); runCheckSoon(); }));
 $$('input[name=subs]').forEach(r => r.addEventListener('change', savePrefs));
 $('#style').addEventListener('change', savePrefs);
-$('#tiao').addEventListener('change', () => { savePrefs(); runCheck(); });
+['#tiao', '#numbers'].forEach(s => $(s).addEventListener('change', () => { savePrefs(); runCheck(); }));
 $('#pronunciation').addEventListener('input', () => {
   savePrefs(); checkOk = false; ++checkSeq;
   $('#pronunciationPreview').textContent = '读法已修改，点击“检查读法”查看效果。';
@@ -511,15 +517,12 @@ async function runCheck() {
   fd.append('speed', curSpeed()); fd.append('engine', engine());
   fd.append('start', $('#start').value || 0); fd.append('end', $('#end').value || 0);
   fd.append('pronunciation', $('#pronunciation').value); fd.append('tiao', $('#tiao').checked ? 'yes' : '');
+  fd.append('numbers', $('#numbers').checked ? 'yes' : '');
   try {
     const r = await api('/api/check', {method: 'POST', body: fd});
     if (seq !== checkSeq) return;
     lastCheck = r; checkOk = !r.errors.length;
-    const pr = r.pronunciation;
-    $('#pronunciationPreview').innerHTML = pr.changed_sentences
-      ? `<details open><summary>${pr.rule_count} 条自定义规则 · ${pr.changed_sentences} 句读法有变化${pr.changed_sentences > pr.examples.length ? `（显示前 ${pr.examples.length} 句）` : ''}</summary>${pr.examples.map(p =>
-          `<div class="pron-example"><div class="original">P${String(p.page).padStart(2,'0')} 字幕：${esc(p.original)}</div><div class="spoken">配音：${esc(p.spoken)}</div></div>`).join('')}</details>`
-      : `<span class="hint">${pr.rule_count ? `${pr.rule_count} 条规则未改变所选页的读法，请核对原词和页码。` : '未设置自定义读法，按讲稿原文朗读。'}</span>`;
+    renderPronunciation(r.pronunciation);
     $('#title').placeholder = r.title || '';
     let h = '';
     if (r.stats.pages) h += `<div class="stats">
@@ -537,6 +540,28 @@ async function runCheck() {
   } catch (e) { if (seq === checkSeq) { checkOk = false; lastCheck = null; $('#pronunciationPreview').textContent = '检查未通过，请按红色提示修改。'; $('#checkBox').innerHTML = `<div class="msg err">${icon('alert')}<span>${esc(e.message)}</span></div>`; } }
   renderSum();
 }
+/* 读法预览：配音文字里被替换的片段高亮，悬停可看原词；列出在所选页没用上的规则 */
+function renderPronunciation(pr) {
+  const box = $('#pronunciationPreview');
+  const KIND = {rule: '自定义规则', builtin: '“调”读 tiáo', number: '数字读法'};
+  const spoken = ex => (ex.segments || [{text: ex.spoken}]).map(seg => seg.source
+    ? `<mark class="k-${seg.kind}" title="${KIND[seg.kind] || '读法'}，原文：${esc(seg.source)}">${esc(seg.display || seg.text)}</mark>` : esc(seg.text)).join('');
+  $('#numbers').disabled = pr.numbers_available === false;
+  $('#numbersHint').textContent = pr.numbers_available === false
+    ? '服务器缺少数字读法规则文件（models/wetext-zh-tn），这一项暂不可用。'
+    : '2026年 → 二零二六年，3.7V → 三点七V，5% → 百分之五，9:30 → 九点三十分。两个模型读法一致；个别型号、单位读错时用上面的规则纠正。';
+  const unused = pr.unused?.length
+    ? `<div class="msg warn">${icon('alert')}<span>${pr.unused.length} 条规则在所选页面没有用上：${pr.unused.slice(0, 8).map(w => `<b>${esc(w)}</b>`).join('、')}${pr.unused.length > 8 ? ' 等' : ''}。请核对原词（区分大小写）和页码范围。</span></div>` : '';
+  if (!pr.changed_sentences) {
+    box.innerHTML = unused || `<span class="hint">${pr.rule_count ? '' : '没有设置自定义读法，按讲稿原文朗读。'}</span>`;
+    return;
+  }
+  const used = Object.entries(pr.hits || {}).filter(([, n]) => n).length;
+  const parts = [used && `${used} 条自定义规则生效`, pr.builtin_hits && `“调”读 tiáo ${pr.builtin_hits} 处`,
+                 pr.number_hits && `数字读法 ${pr.number_hits} 处`].filter(Boolean).join(' · ');
+  box.innerHTML = `${unused}<details open><summary>${parts} · ${pr.changed_sentences} 句读法有变化${pr.changed_sentences > pr.examples.length ? `（显示前 ${pr.examples.length} 句）` : ''}</summary>${pr.examples.map(ex =>
+    `<div class="pron-example"><div class="original">P${String(ex.page).padStart(2,'0')} 字幕：${esc(ex.original)}</div><div class="spoken">配音：${spoken(ex)}</div></div>`).join('')}</details>`;
+}
 function renderSum() {
   const v = voices.find(x => x.id === $('input[name=voice]:checked')?.value);
   const parts = [];
@@ -551,11 +576,14 @@ function renderSum() {
 $('#jobForm').onsubmit = async e => {
   e.preventDefault();
   if (!$('#ppt').files[0] || !$('#script').files[0]) return toast('请先选择课件和讲稿', 'err');
+  // 刚改完读法或页码就点提交时，检查可能还在进行：等它跑完再判断
+  if (!checkOk) await runCheck();
   if (!checkOk) return toast('讲稿检查没通过，先按红色提示修改', 'err');
   if (!$('input[name=voice]:checked')) return toast('请先选择或添加一个音色', 'err');
   const fd = new FormData(e.target);
   fd.set('speed', curSpeed()); fd.set('start', $('#start').value || 0); fd.set('end', $('#end').value || 0);
   if (!$('#tiao').checked) fd.set('tiao', '');
+  if (!$('#numbers').checked) fd.set('numbers', '');
   const btn = $('#submitBtn'), bar = $('#upbar');
   btn.disabled = true; btn.innerHTML = '<span class="spin"></span> 上传中…'; bar.hidden = false;
   try {
@@ -710,7 +738,7 @@ function renderJob(j) {
     <div>
       <div class="t-top"><div class="t-title">${esc(j.title)}</div><span class="pill p-${j.status}">${STATUS[j.status]}${j.status === 'queued' && j.queue_pos ? ` · 第 ${j.queue_pos} 位` : ''}</span></div>
       <div class="t-meta"><span>${fmtTime(j.created)}</span><span>${esc(j.voice_name)}</span><span>${model}</span><span>语速 ${j.speed}</span><span>${pages}</span>
-        ${j.pronunciation_preview?.rule_count ? `<span>自定义读法 ${j.pronunciation_preview.rule_count} 条</span>` : ''}
+        ${j.pronunciation_preview?.rule_count ? `<span>自定义读法 ${j.pronunciation_preview.rule_count} 条</span>` : ''}${j.numbers ? '<span>数字按中文读</span>' : ''}
         ${done && j.started && j.finished ? `<span>用时 ${fmtDur(j.finished - j.started)}</span>` : ''}</div>`;
   if (j.status === 'running') {
     const p = jobProgress(j);

@@ -33,10 +33,11 @@ ap.add_argument('--gap', type=float, default=0.5, help='句间停顿（秒）');
 ap.add_argument('--lead', type=float, default=0.6, help='翻页后开口前的留白'); ap.add_argument('--tail', type=float, default=0.9)
 ap.add_argument('--tiao', action='store_true', help='“调”统一读 tiáo（调参、电调…；强调/调度/对调除外），控制类课程用')
 ap.add_argument('--pronunciation', help='读音规则 UTF-8 文件，每行 原词 => 读法；只改配音，字幕保留原文')
+ap.add_argument('--numbers', action='store_true', help='数字、单位、日期按中文读（2026年→二零二六年，3.7V→三点七V）；只改配音')
 ap.add_argument('--subs', choices=['burn', 'soft', 'none'], default='burn', help='burn 硬字幕 / soft 软字幕轨 / none 只出 .srt')
 a = ap.parse_args()
 try:
-    pron = Pronunciation(pathlib.Path(a.pronunciation).read_text(encoding='utf-8-sig') if a.pronunciation else '', a.engine, a.tiao)
+    pron = Pronunciation(pathlib.Path(a.pronunciation).read_text(encoding='utf-8-sig') if a.pronunciation else '', a.engine, a.tiao, a.numbers)
 except (OSError, UnicodeError, ValueError) as e:
     ap.error(str(e))
 assert a.slides or a.img_dir, '需要 --slides 或 --img-dir'
