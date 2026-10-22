@@ -7,6 +7,11 @@
 """
 import re
 
+def sentences(para):
+    """配音与读法预览使用同一套分句规则。"""
+    return [s for s in re.split(r'(?<=[。？！])', para) if s.strip()]
+
+
 def read_text(raw: bytes) -> str:
     for enc in ('utf-8-sig', 'gb18030'):
         try:

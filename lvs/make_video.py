@@ -12,6 +12,7 @@ import os, sys, re, time, argparse, subprocess, pathlib
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import config, script as S, slides
+from pronunciation import Pronunciation
 
 ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 ap.add_argument('--script', required=True, help='讲稿 .md')
@@ -31,8 +32,14 @@ ap.add_argument('--cfg', type=float, default=2.0); ap.add_argument('--steps', ty
 ap.add_argument('--gap', type=float, default=0.5, help='句间停顿（秒）'); ap.add_argument('--para-gap', type=float, default=0.8)
 ap.add_argument('--lead', type=float, default=0.6, help='翻页后开口前的留白'); ap.add_argument('--tail', type=float, default=0.9)
 ap.add_argument('--tiao', action='store_true', help='“调”统一读 tiáo（调参、电调…；强调/调度/对调除外），控制类课程用')
+ap.add_argument('--pronunciation', help='读音规则 UTF-8 文件，每行 原词 => 读法；只改配音，字幕保留原文')
+ap.add_argument('--numbers', action='store_true', help='数字、单位、日期按中文读（2026年→二零二六年，3.7V→三点七V）；只改配音')
 ap.add_argument('--subs', choices=['burn', 'soft', 'none'], default='burn', help='burn 硬字幕 / soft 软字幕轨 / none 只出 .srt')
 a = ap.parse_args()
+try:
+    pron = Pronunciation(pathlib.Path(a.pronunciation).read_text(encoding='utf-8-sig') if a.pronunciation else '', a.engine, a.tiao, a.numbers)
+except (OSError, UnicodeError, ValueError) as e:
+    ap.error(str(e))
 assert a.slides or a.img_dir, '需要 --slides 或 --img-dir'
 assert a.voice_wav and a.voice_text, '需要 --voice-wav 和 --voice-text（或在 .env 里配置内置音色）'
 if a.speed is None:
@@ -87,25 +94,13 @@ else:
 
 sil = lambda s: torch.zeros(1, int(round(s * sr)))
 
-# 读音修正只作用于合成文本，字幕保持原字。CosyVoice3 支持 [声母][带调韵母] 标注；VoxCPM2 不支持，改用同音字。
-DIAO_WORDS = ('强调', '调度', '对调')
-def pron(text):
-    if not a.tiao:
-        return text
-    for i, w in enumerate(DIAO_WORDS):
-        text = text.replace(w, f'<<{i}>>')
-    text = text.replace('调', '[t][iáo]' if a.engine == 'cosyvoice' else '条')
-    for i, w in enumerate(DIAO_WORDS):
-        text = text.replace(f'<<{i}>>', w)
-    return text
-
 concat, srt, clock, t0 = [], [], 0.0, time.time()
 for p in pages:
     pieces, cur = [sil(a.lead)], a.lead
     for pi, para in enumerate(p['paras']):
-        sents = [s for s in re.split(r'(?<=[。？！])', para) if s.strip()]
+        sents = S.sentences(para)
         for si, s in enumerate(sents):
-            w = tts(pron(s))
+            w = tts(pron.apply(s))
             d = w.shape[1] / sr
             srt.append((clock + cur, clock + cur + d, s.strip()))
             pieces.append(w); cur += d

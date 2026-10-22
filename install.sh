@@ -61,6 +61,21 @@ if [ $SKIP_MODELS = 0 ]; then
   done
 fi
 
+# 数字和单位按中文读的规则文件（WeTextProcessing 包里预编译的中文 TN FST，从 PyPI 取，几 MB）
+if [ ! -f models/wetext-zh-tn/zh_tn_verbalizer.fst ]; then
+  say "数字读法规则 models/wetext-zh-tn"
+  tmp=$(mktemp -d)
+  "$MAIN/bin/pip" download "${PIP_INDEX[@]}" --no-deps --only-binary :all: -d "$tmp" WeTextProcessing==1.2.0
+  mkdir -p models/wetext-zh-tn
+  "$MAIN/bin/python" - "$tmp" <<'PY'
+import glob, sys, zipfile
+with zipfile.ZipFile(glob.glob(sys.argv[1] + '/*.whl')[0]) as wheel:
+    for name in ('zh_tn_tagger.fst', 'zh_tn_verbalizer.fst'):
+        open(f'models/wetext-zh-tn/{name}', 'wb').write(wheel.read(f'tn/{name}'))
+PY
+  rm -rf "$tmp"
+fi
+
 say "5/5 配置"
 if [ ! -f .env ]; then
   cp .env.example .env
