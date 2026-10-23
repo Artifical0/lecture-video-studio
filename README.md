@@ -41,7 +41,7 @@ sudo apt install libreoffice-impress               # 可选：直接上传 .pptx
 然后：
 
 ```bash
-git clone https://github.com/Artifical0/lecture-video-studio.git
+git clone https://github.com/ByteJuno/lecture-video-studio.git
 cd lecture-video-studio
 ./install.sh          # 国内网络用 ./install.sh --cn（清华 conda / 阿里云 pip 镜像）
 ./run.sh start        # 打开 http://服务器IP:8095 ，密码见 install.sh 的输出或 .env
